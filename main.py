@@ -1,7 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import requests
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -14,6 +17,63 @@ DEFAULT_CONVEYANCING = 1500
 DEFAULT_REMOVALS = 800
 DEFAULT_MISC = 500
 DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
+
+
+def generate_pdf_report(data, lead_id):
+    os.makedirs("reports", exist_ok=True)
+
+    filename = f"report_{lead_id}.pdf"
+    filepath = os.path.join("reports", filename)
+
+    c = canvas.Canvas(filepath, pagesize=A4)
+    width, height = A4
+
+    y = height - 50
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(50, y, "Your Property Report")
+
+    y -= 40
+    c.setFont("Helvetica", 12)
+    c.drawString(50, y, f"Generated: {datetime.now().strftime('%d/%m/%Y')}")
+
+    y -= 30
+    c.drawString(50, y, f"Name: {data.get('name', '')}")
+    y -= 20
+    c.drawString(50, y, f"Email: {data.get('email', '')}")
+
+    y -= 40
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Results Summary")
+
+    y -= 30
+    c.setFont("Helvetica", 12)
+    c.drawString(
+        50,
+        y,
+        f"Valuation Range: £{data.get('valuation_low', 0):,.0f} - £{data.get('valuation_high', 0):,.0f}"
+    )
+    y -= 20
+    c.drawString(50, y, f"Moving Costs: £{data.get('moving_costs', 0):,.0f}")
+    y -= 20
+    c.drawString(50, y, f"Net Proceeds: £{data.get('net_proceeds', 0):,.0f}")
+    y -= 20
+    c.drawString(50, y, f"Borrowing Power: £{data.get('borrowing_power', 0):,.0f}")
+    y -= 20
+    c.drawString(50, y, f"Max Budget: £{data.get('max_budget', 0):,.0f}")
+
+    y -= 40
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Recommendation")
+
+    y -= 25
+    c.setFont("Helvetica", 12)
+    recommendation = data.get("recommendation", "No recommendation available.")
+    c.drawString(50, y, recommendation[:100])
+
+    c.save()
+
+    return filepath
 
 
 def estimate_moving_costs(estimated_value: float, extra_override: float = 0) -> dict:
@@ -67,7 +127,7 @@ def recommendation_text(result_type: str) -> str:
     return mapping.get(result_type, "You may need to review your assumptions before deciding.")
 
 
-def get_mock_valuation(address: str, property_type: str | None = None) -> dict:
+def get_mock_valuation(address: str, property_type=None) -> dict:
     base_values = {
         "flat": 220000,
         "terraced": 275000,
@@ -87,7 +147,7 @@ def get_mock_valuation(address: str, property_type: str | None = None) -> dict:
     }
 
 
-def get_real_valuation(address: str, property_type: str | None = None) -> dict:
+def get_real_valuation(address: str, property_type=None) -> dict:
     if not VALUATION_API_URL:
         return get_mock_valuation(address, property_type)
 
@@ -123,6 +183,11 @@ def get_real_valuation(address: str, property_type: str | None = None) -> dict:
 @app.get("/")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/reports/<filename>")
+def get_report(filename):
+    return send_from_directory("reports", filename)
 
 
 @app.post("/value")
@@ -164,7 +229,7 @@ def calculate():
     confidence = valuation.get("confidence", "Medium")
 
     if estimated_value <= 0:
-      return jsonify({"error": "Valid valuation data is required."}), 400
+        return jsonify({"error": "Valid valuation data is required."}), 400
 
     moving_costs = estimate_moving_costs(estimated_value, extra_costs_override)
     total_costs = moving_costs["total"] + early_repayment_charge
@@ -228,22 +293,52 @@ def lead():
     if not full_name or not email:
         return jsonify({"error": "Full name and email are required."}), 400
 
-    # For now, just return success.
-    # Later you can save to Airtable, HubSpot, Sheets, email, etc.
-    return jsonify({
-        "success": True,
-        "message": "Lead received.",
-        "lead": {
-            "full_name": full_name,
+    try:
+        # Temporary lead ID until database save is connected
+        lead_id = int(datetime.now().timestamp())
+
+        pdf_data = {
+            "name": full_name,
             "email": email,
-            "phone": phone,
-            "help_requested": help_requested
+            "valuation_low": float(data.get("valuation_low", 0) or 0),
+            "valuation_high": float(data.get("valuation_high", 0) or 0),
+            "moving_costs": float(data.get("moving_costs", 0) or 0),
+            "net_proceeds": float(data.get("net_proceeds", 0) or 0),
+            "borrowing_power": float(data.get("borrowing_power", 0) or 0),
+            "max_budget": float(data.get("max_budget", 0) or 0),
+            "recommendation": data.get("recommendation", "No recommendation available.")
         }
-    })
 
+        pdf_path = generate_pdf_report(pdf_data, lead_id)
+        filename = os.path.basename(pdf_path)
+        pdf_url = f"/reports/{filename}"
 
-if __name__ == "__main__":
-    app.run(debug=True)
+        # TODO: save to your database here
+        # Example:
+        # save_lead_to_database(
+        #     full_name=full_name,
+        #     email=email,
+        #     phone=phone,
+        #     help_requested=help_requested,
+        #     pdf_path=pdf_path
+        # )
+
+        return jsonify({
+            "success": True,
+            "message": "Lead received and PDF generated.",
+            "lead": {
+                "lead_id": lead_id,
+                "full_name": full_name,
+                "email": email,
+                "phone": phone,
+                "help_requested": help_requested,
+                "pdf_path": pdf_path,
+                "pdf_url": pdf_url
+            }
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to create lead report: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
