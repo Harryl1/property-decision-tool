@@ -4,61 +4,83 @@ import os
 import requests
 
 app = Flask(__name__)
-
-# Allow requests from your Carrd site
 CORS(app, resources={r"/*": {"origins": "*"}})
-
-# -----------------------------------------------------------------------------
-# CONFIG
-# -----------------------------------------------------------------------------
 
 VALUATION_API_URL = os.getenv("VALUATION_API_URL", "")
 VALUATION_API_KEY = os.getenv("VALUATION_API_KEY", "")
 
-# Change this later if you want more realistic logic
-DEFAULT_AGENT_FEE_PERCENT = 0.012   # 1.2%
+DEFAULT_AGENT_FEE_PERCENT = 0.012
 DEFAULT_CONVEYANCING = 1500
 DEFAULT_REMOVALS = 800
 DEFAULT_MISC = 500
 DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
 
 
-# -----------------------------------------------------------------------------
-# HELPERS
-# -----------------------------------------------------------------------------
-
-def estimate_moving_costs(estimated_value: float) -> dict:
+def estimate_moving_costs(estimated_value: float, extra_override: float = 0) -> dict:
     agent_fee = estimated_value * DEFAULT_AGENT_FEE_PERCENT
     conveyancing = DEFAULT_CONVEYANCING
     removals = DEFAULT_REMOVALS
     misc = DEFAULT_MISC
-    total = agent_fee + conveyancing + removals + misc
+    base_total = agent_fee + conveyancing + removals + misc
+    total = base_total + max(extra_override, 0)
 
     return {
         "agent_fee": round(agent_fee),
         "conveyancing": round(conveyancing),
         "removals": round(removals),
         "misc": round(misc),
+        "extra_override": round(max(extra_override, 0)),
         "total": round(total),
     }
 
 
-def recommendation_text(max_budget: float, estimated_value: float, net_proceeds: float) -> str:
+def get_result_type(plan: str, net_proceeds: float, max_budget: float, target_price: float = 0) -> str:
     if net_proceeds <= 0:
-        return "Selling may be difficult unless your mortgage balance or costs are lower than estimated."
-    if max_budget >= estimated_value * 1.15:
-        return "You could be in a strong position to move and increase your budget."
-    if max_budget >= estimated_value:
-        return "You may be in a position to move, depending on your next property and mortgage terms."
-    return "You may need to review your onward budget or wait before moving."
+        return "negative_equity_risk"
+
+    if plan == "rent":
+        return "renting_next"
+
+    if target_price > 0:
+        if max_budget >= target_price:
+            return "can_afford_target"
+        if max_budget >= target_price * 0.9:
+            return "close_but_tight"
+        return "budget_gap"
+
+    if max_budget >= 0:
+        return "general_affordable"
+
+    return "needs_review"
+
+
+def recommendation_text(result_type: str) -> str:
+    mapping = {
+        "negative_equity_risk": "Selling may be difficult unless your mortgage balance or costs are lower than estimated.",
+        "renting_next": "You may be able to release funds from your sale, but your next-step affordability depends on your expected rent and timing.",
+        "can_afford_target": "You appear to be in a position to afford your target price, subject to lender criteria and final selling costs.",
+        "close_but_tight": "You may be close to affording your target, but the numbers look tight at current assumptions.",
+        "budget_gap": "There appears to be a gap between your likely budget and your target price.",
+        "general_affordable": "You may be in a position to move, depending on the property you choose and your mortgage terms.",
+        "needs_review": "You may need to review your assumptions before deciding.",
+    }
+    return mapping.get(result_type, "You may need to review your assumptions before deciding.")
 
 
 def get_mock_valuation(address: str, property_type: str | None = None) -> dict:
-    # Temporary mock response for testing
+    base_values = {
+        "flat": 220000,
+        "terraced": 275000,
+        "semi-detached": 325000,
+        "detached": 450000,
+    }
+
+    estimated = base_values.get((property_type or "").lower(), 300000)
+
     return {
-        "estimated_value": 300000,
-        "low": 285000,
-        "high": 315000,
+        "estimated_value": round(estimated),
+        "low": round(estimated * 0.95),
+        "high": round(estimated * 1.05),
         "confidence": "Medium",
         "address": address,
         "property_type": property_type or ""
@@ -66,9 +88,6 @@ def get_mock_valuation(address: str, property_type: str | None = None) -> dict:
 
 
 def get_real_valuation(address: str, property_type: str | None = None) -> dict:
-    """
-    Replace this with your real valuation API request shape.
-    """
     if not VALUATION_API_URL:
         return get_mock_valuation(address, property_type)
 
@@ -86,7 +105,6 @@ def get_real_valuation(address: str, property_type: str | None = None) -> dict:
     response.raise_for_status()
     raw = response.json()
 
-    # Adjust mapping to your provider's actual response keys
     estimated = float(raw.get("estimated_value", 0))
     low = float(raw.get("low", estimated * 0.95))
     high = float(raw.get("high", estimated * 1.05))
@@ -101,14 +119,6 @@ def get_real_valuation(address: str, property_type: str | None = None) -> dict:
         "property_type": property_type or ""
     }
 
-
-# -----------------------------------------------------------------------------
-# ROUTES
-# -----------------------------------------------------------------------------
-
-@app.route("/")
-def home():
-    return {"status": "ok"}
 
 @app.get("/")
 def health():
@@ -140,8 +150,13 @@ def calculate():
 
     valuation = data.get("valuation") or {}
     mortgage = float(data.get("mortgage", 0) or 0)
+    early_repayment_charge = float(data.get("early_repayment_charge", 0) or 0)
+    extra_costs_override = float(data.get("extra_costs_override", 0) or 0)
+    plan = (data.get("plan") or "").strip().lower()
+    target_price = float(data.get("target_price", 0) or 0)
     income = float(data.get("income", 0) or 0)
     partner_income = float(data.get("partner_income", 0) or 0)
+    current_monthly_payment = float(data.get("current_monthly_payment", 0) or 0)
 
     estimated_value = float(valuation.get("estimated_value", 0) or 0)
     low = float(valuation.get("low", 0) or 0)
@@ -149,25 +164,33 @@ def calculate():
     confidence = valuation.get("confidence", "Medium")
 
     if estimated_value <= 0:
-        return jsonify({"error": "Valid valuation data is required."}), 400
+      return jsonify({"error": "Valid valuation data is required."}), 400
 
-    moving_costs = estimate_moving_costs(estimated_value)
+    moving_costs = estimate_moving_costs(estimated_value, extra_costs_override)
+    total_costs = moving_costs["total"] + early_repayment_charge
+    net_proceeds = estimated_value - mortgage - total_costs
+
     total_income = income + partner_income
-    borrowing_power = total_income * DEFAULT_AFFORDABILITY_MULTIPLE
-    net_proceeds = estimated_value - mortgage - moving_costs["total"]
+    borrowing_power = 0 if plan == "rent" else total_income * DEFAULT_AFFORDABILITY_MULTIPLE
     max_budget = max(net_proceeds, 0) + borrowing_power
 
     monthly_payment_estimate = None
-    if max_budget > max(net_proceeds, 0):
+    if plan != "rent" and borrowing_power > 0:
         loan_needed = max(max_budget - max(net_proceeds, 0), 0)
-        # Very rough estimate: not mortgage advice
-        monthly_payment_estimate = round((loan_needed * 0.006))
+        monthly_payment_estimate = round(loan_needed * 0.006)
 
-    recommendation = recommendation_text(
+    monthly_payment_change = None
+    if monthly_payment_estimate is not None and current_monthly_payment > 0:
+        monthly_payment_change = round(monthly_payment_estimate - current_monthly_payment)
+
+    result_type = get_result_type(
+        plan=plan,
+        net_proceeds=net_proceeds,
         max_budget=max_budget,
-        estimated_value=estimated_value,
-        net_proceeds=net_proceeds
+        target_price=target_price
     )
+
+    recommendation = recommendation_text(result_type)
 
     return jsonify({
         "valuation": {
@@ -176,17 +199,51 @@ def calculate():
             "high": round(high),
             "confidence": confidence
         },
+        "plan": plan,
         "moving_costs": moving_costs,
-        "mortgage_remaining": round(mortgage),
+        "early_repayment_charge": round(early_repayment_charge),
+        "net_proceeds": round(net_proceeds),
         "income": round(income),
         "partner_income": round(partner_income),
         "total_income": round(total_income),
         "borrowing_power": round(borrowing_power),
-        "net_proceeds": round(net_proceeds),
+        "target_price": round(target_price),
         "max_budget": round(max_budget),
         "monthly_payment_estimate": monthly_payment_estimate,
+        "monthly_payment_change": monthly_payment_change,
+        "result_type": result_type,
         "recommendation": recommendation
     })
+
+
+@app.post("/lead")
+def lead():
+    data = request.get_json(force=True)
+
+    full_name = (data.get("full_name") or "").strip()
+    email = (data.get("email") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    help_requested = data.get("help_requested") or []
+
+    if not full_name or not email:
+        return jsonify({"error": "Full name and email are required."}), 400
+
+    # For now, just return success.
+    # Later you can save to Airtable, HubSpot, Sheets, email, etc.
+    return jsonify({
+        "success": True,
+        "message": "Lead received.",
+        "lead": {
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "help_requested": help_requested
+        }
+    })
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
 
 
 if __name__ == "__main__":
