@@ -18,12 +18,17 @@ DEFAULT_REMOVALS = 800
 DEFAULT_MISC = 500
 DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
 
+REPORTS_DIR = "generated_reports"
+
 
 def generate_pdf_report(data, lead_id):
-    os.makedirs("reports", exist_ok=True)
+    if os.path.exists(REPORTS_DIR) and not os.path.isdir(REPORTS_DIR):
+        raise Exception(f"'{REPORTS_DIR}' exists but is not a folder.")
+
+    os.makedirs(REPORTS_DIR, exist_ok=True)
 
     filename = f"report_{lead_id}.pdf"
-    filepath = os.path.join("reports", filename)
+    filepath = os.path.join(REPORTS_DIR, filename)
 
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
@@ -187,7 +192,7 @@ def health():
 
 @app.route("/reports/<filename>")
 def get_report(filename):
-    return send_from_directory("reports", filename)
+    return send_from_directory(REPORTS_DIR, filename)
 
 
 @app.post("/value")
@@ -294,7 +299,6 @@ def lead():
         return jsonify({"error": "Full name and email are required."}), 400
 
     try:
-        # Temporary lead ID until database save is connected
         lead_id = int(datetime.now().timestamp())
 
         pdf_data = {
@@ -312,16 +316,6 @@ def lead():
         pdf_path = generate_pdf_report(pdf_data, lead_id)
         filename = os.path.basename(pdf_path)
         pdf_url = f"/reports/{filename}"
-
-        # TODO: save to your database here
-        # Example:
-        # save_lead_to_database(
-        #     full_name=full_name,
-        #     email=email,
-        #     phone=phone,
-        #     help_requested=help_requested,
-        #     pdf_path=pdf_path
-        # )
 
         return jsonify({
             "success": True,
