@@ -5,6 +5,7 @@ import requests
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from datetime import datetime
+import requests
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -316,6 +317,24 @@ def lead():
         pdf_path = generate_pdf_report(pdf_data, lead_id)
         filename = os.path.basename(pdf_path)
         pdf_url = f"/reports/{filename}"
+
+        try:
+            booking_payload = {
+                "full_name": full_name,
+                "email": email,
+                "phone": phone,
+                "source": "property_tool",
+                "created_at": datetime.now().isoformat(),
+                "notes": f"PDF report: {pdf_url}"
+            }
+
+            requests.post(
+                "https://booking-system-b13f.onrender.com/save-lead",
+                json=booking_payload,
+                timeout=10
+            )
+        except Exception as e:
+            print("Booking save failed:", e)
 
         return jsonify({
             "success": True,
