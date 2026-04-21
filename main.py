@@ -47,6 +47,8 @@ def generate_pdf_report(data, lead_id):
     c.drawString(50, y, f"Name: {data.get('name', '')}")
     y -= 20
     c.drawString(50, y, f"Email: {data.get('email', '')}")
+    y -= 20
+    c.drawString(50, y, f"Address: {data.get('address', '')}")
 
     y -= 40
     c.setFont("Helvetica-Bold", 14)
@@ -294,10 +296,13 @@ def lead():
     full_name = (data.get("full_name") or "").strip()
     email = (data.get("email") or "").strip()
     phone = (data.get("phone") or "").strip()
+    address = (data.get("address") or "").strip()
     help_requested = data.get("help_requested") or []
 
     if not full_name or not email:
         return jsonify({"error": "Full name and email are required."}), 400
+    if not address:
+        return jsonify({"error": "Address is required."}), 400
 
     try:
         lead_id = int(datetime.now().timestamp())
@@ -305,6 +310,7 @@ def lead():
         pdf_data = {
             "name": full_name,
             "email": email,
+            "address": address,
             "valuation_low": float(data.get("valuation_low", 0) or 0),
             "valuation_high": float(data.get("valuation_high", 0) or 0),
             "moving_costs": float(data.get("moving_costs", 0) or 0),
@@ -320,9 +326,11 @@ def lead():
 
         try:
             booking_payload = {
-                "full_name": full_name,
+                "name": full_name,
                 "email": email,
                 "phone": phone,
+                "address": (data.get("address") or "").strip(),
+                "valuation": int(float(data.get("valuation_high", 0) or 0)),
                 "source": "property_tool",
                 "created_at": datetime.now().isoformat(),
                 "notes": f"PDF report: {pdf_url}"
