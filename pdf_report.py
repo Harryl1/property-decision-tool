@@ -352,11 +352,16 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     header_left = []
     if logo_path and os.path.exists(logo_path):
         try:
-            img = Image(logo_path, width=28 * mm, height=10 * mm)
+            print("Trying to load logo from:", logo_path)
+            img = Image(logo_path, width=36 * mm, height=12 * mm)
+            img.hAlign = "LEFT"
             header_left.append(img)
-            header_left.append(Spacer(1, 2))
-        except Exception:
-            pass
+            header_left.append(Spacer(1, 4))
+            print("Logo loaded successfully")
+        except Exception as e:
+            print("Logo failed to load:", str(e))
+    else:
+        print("Logo path missing or file does not exist:", logo_path)
 
     header_left.append(Paragraph("Your Property Report", styles["ReportTitle"]))
     header_left.append(Paragraph(

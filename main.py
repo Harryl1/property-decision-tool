@@ -286,6 +286,11 @@ def lead():
         if not os.path.exists(logo_path):
             logo_path = None
 
+        print("BASE_DIR:", BASE_DIR)
+        print("STATIC_DIR:", STATIC_DIR)
+        print("LOGO PATH:", logo_path)
+        print("LOGO EXISTS:", os.path.exists(logo_path) if logo_path else False)
+
         generate_pdf_report(
             report_data=pdf_data,
             filepath=filepath,
