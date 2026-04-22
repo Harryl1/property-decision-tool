@@ -1,11 +1,10 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from datetime import datetime
 import os
 import requests
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from datetime import datetime
-import requests
+
+from pdf_report import generate_pdf_report
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -19,69 +18,20 @@ DEFAULT_REMOVALS = 800
 DEFAULT_MISC = 500
 DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
 
-REPORTS_DIR = "generated_reports"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+REPORTS_DIR = os.path.join(BASE_DIR, "generated_reports")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+os.makedirs(REPORTS_DIR, exist_ok=True)
 
 
-def generate_pdf_report(data, lead_id):
-    if os.path.exists(REPORTS_DIR) and not os.path.isdir(REPORTS_DIR):
-        raise Exception(f"'{REPORTS_DIR}' exists but is not a folder.")
-
-    os.makedirs(REPORTS_DIR, exist_ok=True)
-
-    filename = f"report_{lead_id}.pdf"
-    filepath = os.path.join(REPORTS_DIR, filename)
-
-    c = canvas.Canvas(filepath, pagesize=A4)
-    width, height = A4
-
-    y = height - 50
-
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(50, y, "Your Property Report")
-
-    y -= 40
-    c.setFont("Helvetica", 12)
-    c.drawString(50, y, f"Generated: {datetime.now().strftime('%d/%m/%Y')}")
-
-    y -= 30
-    c.drawString(50, y, f"Name: {data.get('name', '')}")
-    y -= 20
-    c.drawString(50, y, f"Email: {data.get('email', '')}")
-    y -= 20
-    c.drawString(50, y, f"Address: {data.get('address', '')}")
-
-    y -= 40
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y, "Results Summary")
-
-    y -= 30
-    c.setFont("Helvetica", 12)
-    c.drawString(
-        50,
-        y,
-        f"Valuation Range: £{data.get('valuation_low', 0):,.0f} - £{data.get('valuation_high', 0):,.0f}"
-    )
-    y -= 20
-    c.drawString(50, y, f"Moving Costs: £{data.get('moving_costs', 0):,.0f}")
-    y -= 20
-    c.drawString(50, y, f"Net Proceeds: £{data.get('net_proceeds', 0):,.0f}")
-    y -= 20
-    c.drawString(50, y, f"Borrowing Power: £{data.get('borrowing_power', 0):,.0f}")
-    y -= 20
-    c.drawString(50, y, f"Max Budget: £{data.get('max_budget', 0):,.0f}")
-
-    y -= 40
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y, "Recommendation")
-
-    y -= 25
-    c.setFont("Helvetica", 12)
-    recommendation = data.get("recommendation", "No recommendation available.")
-    c.drawString(50, y, recommendation[:100])
-
-    c.save()
-
-    return filepath
+def to_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def estimate_moving_costs(estimated_value: float, extra_override: float = 0) -> dict:
@@ -193,7 +143,7 @@ def health():
     return jsonify({"status": "ok"})
 
 
-@app.route("/reports/<filename>")
+@app.route("/reports/<path:filename>")
 def get_report(filename):
     return send_from_directory(REPORTS_DIR, filename)
 
@@ -222,18 +172,18 @@ def calculate():
     data = request.get_json(force=True)
 
     valuation = data.get("valuation") or {}
-    mortgage = float(data.get("mortgage", 0) or 0)
-    early_repayment_charge = float(data.get("early_repayment_charge", 0) or 0)
-    extra_costs_override = float(data.get("extra_costs_override", 0) or 0)
+    mortgage = to_float(data.get("mortgage", 0))
+    early_repayment_charge = to_float(data.get("early_repayment_charge", 0))
+    extra_costs_override = to_float(data.get("extra_costs_override", 0))
     plan = (data.get("plan") or "").strip().lower()
-    target_price = float(data.get("target_price", 0) or 0)
-    income = float(data.get("income", 0) or 0)
-    partner_income = float(data.get("partner_income", 0) or 0)
-    current_monthly_payment = float(data.get("current_monthly_payment", 0) or 0)
+    target_price = to_float(data.get("target_price", 0))
+    income = to_float(data.get("income", 0))
+    partner_income = to_float(data.get("partner_income", 0))
+    current_monthly_payment = to_float(data.get("current_monthly_payment", 0))
 
-    estimated_value = float(valuation.get("estimated_value", 0) or 0)
-    low = float(valuation.get("low", 0) or 0)
-    high = float(valuation.get("high", 0) or 0)
+    estimated_value = to_float(valuation.get("estimated_value", 0))
+    low = to_float(valuation.get("low", 0))
+    high = to_float(valuation.get("high", 0))
     confidence = valuation.get("confidence", "Medium")
 
     if estimated_value <= 0:
@@ -293,6 +243,9 @@ def calculate():
 def lead():
     data = request.get_json(force=True)
 
+    print("PROJECT 4 INCOMING DATA:", data)
+    print("PROJECT 4 ADDRESS VALUE:", repr(data.get("address")))
+
     full_name = (data.get("full_name") or "").strip()
     email = (data.get("email") or "").strip()
     phone = (data.get("phone") or "").strip()
@@ -306,22 +259,39 @@ def lead():
 
     try:
         lead_id = int(datetime.now().timestamp())
+        filename = f"report_{lead_id}.pdf"
+        filepath = os.path.join(REPORTS_DIR, filename)
+
+        selected_services = []
+        if isinstance(help_requested, list):
+            selected_services = help_requested
+        elif isinstance(help_requested, str) and help_requested.strip():
+            selected_services = [help_requested.strip()]
 
         pdf_data = {
             "name": full_name,
             "email": email,
             "address": address,
-            "valuation_low": float(data.get("valuation_low", 0) or 0),
-            "valuation_high": float(data.get("valuation_high", 0) or 0),
-            "moving_costs": float(data.get("moving_costs", 0) or 0),
-            "net_proceeds": float(data.get("net_proceeds", 0) or 0),
-            "borrowing_power": float(data.get("borrowing_power", 0) or 0),
-            "max_budget": float(data.get("max_budget", 0) or 0),
-            "recommendation": data.get("recommendation", "No recommendation available.")
+            "valuation_low": to_float(data.get("valuation_low", 0)),
+            "valuation_high": to_float(data.get("valuation_high", 0)),
+            "moving_costs": to_float(data.get("moving_costs", 0)),
+            "net_proceeds": to_float(data.get("net_proceeds", 0)),
+            "borrowing_power": to_float(data.get("borrowing_power", 0)),
+            "max_budget": to_float(data.get("max_budget", 0)),
+            "recommendation": data.get("recommendation", "No recommendation available."),
+            "selected_services": selected_services,
         }
 
-        pdf_path = generate_pdf_report(pdf_data, lead_id)
-        filename = os.path.basename(pdf_path)
+        logo_path = os.path.join(STATIC_DIR, "logo.png")
+        if not os.path.exists(logo_path):
+            logo_path = None
+
+        generate_pdf_report(
+            report_data=pdf_data,
+            filepath=filepath,
+            logo_path=logo_path
+        )
+
         pdf_url = f"/reports/{filename}"
 
         try:
@@ -329,12 +299,13 @@ def lead():
                 "name": full_name,
                 "email": email,
                 "phone": phone,
-                "address": (data.get("address") or "").strip(),
-                "valuation": int(float(data.get("valuation_high", 0) or 0)),
+                "address": address,
+                "valuation": int(to_float(data.get("valuation_high", 0))),
                 "source": "property_tool",
                 "created_at": datetime.now().isoformat(),
                 "notes": f"PDF report: {pdf_url}"
             }
+            print("BOOKING PAYLOAD:", booking_payload)
 
             requests.post(
                 "https://booking-system-b13f.onrender.com/save-lead",
@@ -353,7 +324,7 @@ def lead():
                 "email": email,
                 "phone": phone,
                 "help_requested": help_requested,
-                "pdf_path": pdf_path,
+                "pdf_path": filepath,
                 "pdf_url": pdf_url
             }
         })
