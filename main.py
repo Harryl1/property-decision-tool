@@ -20,7 +20,7 @@ DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPORTS_DIR = os.path.join(BASE_DIR, "generated_reports")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_DIR = os.path.join(BASE_DIR, "Generated_reports", "static")
 
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
