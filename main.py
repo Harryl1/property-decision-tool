@@ -282,7 +282,7 @@ def lead():
             "selected_services": selected_services,
         }
 
-        logo_path = os.path.join(STATIC_DIR, "logo.png")
+        logo_path = os.path.join(STATIC_DIR, "Generated_reports/static/logo.png")
         if not os.path.exists(logo_path):
             logo_path = None
 
