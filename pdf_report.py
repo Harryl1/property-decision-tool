@@ -353,7 +353,7 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     if logo_path and os.path.exists(logo_path):
         try:
             print("Trying to load logo from:", logo_path)
-            img = Image(logo_path, width=36 * mm, height=12 * mm)
+            img = Image(logo_path, width=65 * mm, kind="proportional")
             img.hAlign = "LEFT"
             header_left.append(img)
             header_left.append(Spacer(1, 4))
