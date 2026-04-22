@@ -19,8 +19,8 @@ DEFAULT_MISC = 500
 DEFAULT_AFFORDABILITY_MULTIPLE = 4.5
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(BASE_DIR, "generated_reports")
-STATIC_DIR = os.path.join(BASE_DIR, "Generated_reports", "static")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+REPORTS_DIR = os.path.join(BASE_DIR, "Generated_reports")
 
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
@@ -282,7 +282,7 @@ def lead():
             "selected_services": selected_services,
         }
 
-        logo_path = os.path.join(STATIC_DIR, "Generated_reports/static/logo.png")
+        logo_path = os.path.join(STATIC_DIR, "logo.png")
         if not os.path.exists(logo_path):
             logo_path = None
 
