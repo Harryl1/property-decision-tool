@@ -338,5 +338,41 @@ def lead():
         return jsonify({"error": f"Failed to create lead report: {str(e)}"}), 500
 
 
+@app.post("/lead-action")
+def lead_action():
+    data = request.get_json(force=True)
+
+    email = (data.get("email") or "").strip().lower()
+    action = (data.get("action") or "").strip()
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    if action not in ["valuation_requested", "contact_requested"]:
+        return jsonify({"error": "Invalid action"}), 400
+
+    try:
+        payload = {
+            "email": email,
+            "lead_stage": action,
+            "is_hot_lead": True,
+            "actioned_at": datetime.now().isoformat()
+        }
+
+        print("LEAD ACTION:", payload)
+
+        with open("lead_actions_log.txt", "a", encoding="utf-8") as f:
+            f.write(f"{payload}\n")
+
+        return jsonify({
+            "success": True,
+            "message": "Lead action recorded",
+            "lead": payload
+        })
+
+    except Exception as e:
+        print("Lead action failed:", e)
+        return jsonify({"error": "Failed to log action"}), 500
+
 if __name__ == "__main__":
     app.run(debug=True)
