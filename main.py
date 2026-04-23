@@ -278,7 +278,7 @@ def lead():
             "net_proceeds": to_float(data.get("net_proceeds", 0)),
             "borrowing_power": to_float(data.get("borrowing_power", 0)),
             "max_budget": to_float(data.get("max_budget", 0)),
-            "recommendation": data.get("recommendation", "No recommendation available."),
+            "recommendation": data.get("recommendation") or "No recommendation available.",
             "selected_services": selected_services,
         }
 

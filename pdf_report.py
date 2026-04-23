@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
@@ -13,7 +13,7 @@ from reportlab.platypus import (
     TableStyle,
     HRFlowable,
     Image,
-    KeepTogether
+    PageBreak
 )
 
 # ==========================================
@@ -22,14 +22,20 @@ from reportlab.platypus import (
 
 BRAND = {
     "name": "equiome",
-    "primary": colors.HexColor("#12344D"),      # deep slate/navy
-    "accent": colors.HexColor("#2A7F9E"),       # muted blue-teal
+    "primary": colors.HexColor("#12344D"),
+    "accent": colors.HexColor("#2A7F9E"),
     "text": colors.HexColor("#243342"),
     "subtext": colors.HexColor("#5B6573"),
     "border": colors.HexColor("#D7DEE7"),
     "card_bg": colors.HexColor("#F5F7FA"),
     "highlight_bg": colors.HexColor("#EAF4F8"),
     "white": colors.white,
+}
+
+SERVICE_LABELS = {
+    "agent_valuation": "Local agent valuation",
+    "mortgage_advice": "Mortgage advice",
+    "conveyancing_quote": "Conveyancing quote",
 }
 
 
@@ -43,6 +49,7 @@ def safe_text(value, fallback="—"):
     text = str(value).strip()
     return text if text else fallback
 
+
 def format_currency(value, prefix="£", decimals=0):
     try:
         if value is None:
@@ -51,11 +58,24 @@ def format_currency(value, prefix="£", decimals=0):
     except Exception:
         return f"{prefix}0"
 
+
 def format_currency_range(low, high, prefix="£", decimals=0):
     return f"{format_currency(low, prefix, decimals)} – {format_currency(high, prefix, decimals)}"
 
+
 def ensure_parent_dir(filepath):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+
+def normalise_services(services):
+    cleaned = []
+    for service in services or []:
+        label = SERVICE_LABELS.get(service, service)
+        label = safe_text(label, "").strip()
+        if label and label not in cleaned:
+            cleaned.append(label)
+    return cleaned
+
 
 def build_styles():
     styles = getSampleStyleSheet()
@@ -107,15 +127,6 @@ def build_styles():
         fontName="Helvetica",
         fontSize=8.5,
         leading=11,
-        textColor=BRAND["subtext"],
-    ))
-
-    styles.add(ParagraphStyle(
-        name="Label",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=10,
         textColor=BRAND["subtext"],
     ))
 
@@ -198,17 +209,14 @@ def draw_page_chrome(canvas, doc):
 
     page_width, page_height = A4
 
-    # Thin top accent line
     canvas.setStrokeColor(BRAND["accent"])
     canvas.setLineWidth(2)
     canvas.line(doc.leftMargin, page_height - 12 * mm, page_width - doc.rightMargin, page_height - 12 * mm)
 
-    # Footer line
     canvas.setStrokeColor(BRAND["border"])
     canvas.setLineWidth(0.5)
     canvas.line(doc.leftMargin, 14 * mm, page_width - doc.rightMargin, 14 * mm)
 
-    # Footer text
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(BRAND["subtext"])
     canvas.drawString(doc.leftMargin, 9 * mm, f"{BRAND['name']} property report")
@@ -226,11 +234,8 @@ def metric_card(label, value, styles, width, highlight=False):
     value_style = styles["MetricValueHighlight"] if highlight else styles["MetricValue"]
 
     t = Table(
-        [[
-            Paragraph(label, styles["MetricLabel"]),
-        ], [
-            Paragraph(value, value_style),
-        ]],
+        [[Paragraph(label, styles["MetricLabel"])],
+         [Paragraph(value, value_style)]],
         colWidths=[width]
     )
 
@@ -245,13 +250,15 @@ def metric_card(label, value, styles, width, highlight=False):
     ]))
     return t
 
+
 def summary_box(report_data, styles, content_width):
-    headline = f"Estimated maximum budget: {format_currency(report_data.get('max_budget'))}"
+    headline = f"You could buy up to {format_currency(report_data.get('max_budget'))}"
 
     body_text = (
         f"Based on your current position, your estimated available equity is "
         f"<b>{format_currency(report_data.get('net_proceeds'))}</b> and your indicative "
-        f"borrowing power is <b>{format_currency(report_data.get('borrowing_power'))}</b>."
+        f"borrowing power is <b>{format_currency(report_data.get('borrowing_power'))}</b>. "
+        f"This uses standard affordability assumptions and estimated selling costs."
     )
 
     table = Table(
@@ -270,6 +277,7 @@ def summary_box(report_data, styles, content_width):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
     ]))
     return table
+
 
 def detail_row(label, value, styles, total_width):
     label_width = 58 * mm
@@ -291,6 +299,7 @@ def detail_row(label, value, styles, total_width):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     return t
+
 
 def boxed_section(title, body_flowables, styles, content_width):
     inner = [[Paragraph(title, styles["SectionHeading"])]]
@@ -319,6 +328,7 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     {
         "name": "Jane Smith",
         "email": "jane@example.com",
+        "address": "10 High Street, London",
         "valuation_low": 425000,
         "valuation_high": 450000,
         "moving_costs": 12000,
@@ -326,7 +336,7 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
         "borrowing_power": 280000,
         "max_budget": 713000,
         "recommendation": "Based on your estimated equity and borrowing position...",
-        "selected_services": ["Local agent valuation", "Mortgage advice", "Conveyancing quote"]  # optional
+        "selected_services": ["Local agent valuation", "Mortgage advice", "Conveyancing quote"]
     }
     """
 
@@ -343,13 +353,9 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
 
     styles = build_styles()
     story = []
-
     content_width = A4[0] - doc.leftMargin - doc.rightMargin
+    selected_services = normalise_services(report_data.get("selected_services") or [])
 
-    # ------------------------------------------
-    # Header / branding
-    # ------------------------------------------
-    header_left = []
     # ------------------------------------------
     # Header / branding
     # ------------------------------------------
@@ -416,14 +422,11 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     story.append(Spacer(1, 16))
 
     # ------------------------------------------
-    # Summary panel
+    # Page 1 – Summary
     # ------------------------------------------
     story.append(summary_box(report_data, styles, content_width))
     story.append(Spacer(1, 16))
 
-    # ------------------------------------------
-    # Financial breakdown heading
-    # ------------------------------------------
     story.append(Paragraph("Estimated financial position", styles["SectionHeading"]))
 
     card_gap = 8
@@ -500,33 +503,20 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     story.append(row_3)
     story.append(Spacer(1, 16))
 
-    # ------------------------------------------
-    # Recommendation section
-    # ------------------------------------------
     recommendation_text = safe_text(
         report_data.get("recommendation"),
         "We recommend reviewing your figures with a local expert before making any property decisions."
     )
 
-    recommendation_items = [
-        Paragraph(
-            recommendation_text,
-            styles["Body"]
-        )
-    ]
-
     recommendation_box = boxed_section(
         "Recommended next step",
-        recommendation_items,
+        [Paragraph(recommendation_text, styles["Body"])],
         styles,
         content_width
     )
     story.append(recommendation_box)
     story.append(Spacer(1, 16))
 
-    # ------------------------------------------
-    # Optional client details / assumptions
-    # ------------------------------------------
     assumptions_items = [
         detail_row("Client name", safe_text(report_data.get("name")), styles, content_width),
         detail_row("Email", safe_text(report_data.get("email")), styles, content_width),
@@ -559,10 +549,6 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     )
     story.append(assumptions_box)
 
-    # ------------------------------------------
-    # Optional services requested
-    # ------------------------------------------
-    selected_services = report_data.get("selected_services") or []
     if selected_services:
         story.append(Spacer(1, 16))
         service_lines = [Paragraph("You asked to hear about:", styles["Body"])]
@@ -578,8 +564,78 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
         story.append(services_box)
 
     # ------------------------------------------
-    # Disclaimer
+    # Page 2 – Guidance & next steps
     # ------------------------------------------
+    story.append(PageBreak())
+
+    story.append(Paragraph("What this means for you", styles["SectionHeading"]))
+    story.append(Paragraph(
+        "Based on your estimated equity and borrowing position, this report gives an "
+        "indicative view of what your next move could look like. These figures are designed "
+        "to help you understand your position before speaking to an agent or mortgage advisor.",
+        styles["Body"]
+    ))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Understanding your numbers", styles["SectionHeading"]))
+
+    explain_items = [
+        Paragraph(
+            "<b>Property value:</b> Your estimated valuation range is based on available data and assumptions. "
+            "Actual sale price may vary depending on market conditions.",
+            styles["Body"]
+        ),
+        Paragraph(
+            "<b>Available equity:</b> This is what you may have left after repaying your mortgage and "
+            "estimated selling costs.",
+            styles["Body"]
+        ),
+        Paragraph(
+            "<b>Borrowing power:</b> This is an indicative estimate based on standard affordability multiples. "
+            "A lender may offer more or less depending on your income profile, commitments, deposit position, "
+            "and credit assessment.",
+            styles["Body"]
+        ),
+        Paragraph(
+            "<b>Maximum budget:</b> This combines your estimated available equity with your indicative borrowing "
+            "capacity to show the upper end of what your next purchase could look like.",
+            styles["Body"]
+        ),
+    ]
+
+    for item in explain_items:
+        story.append(item)
+        story.append(Spacer(1, 6))
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Next steps", styles["SectionHeading"]))
+
+    next_steps = []
+
+    if "Local agent valuation" in selected_services:
+        next_steps.append("Arrange a local agent valuation to refine your likely sale price.")
+    if "Mortgage advice" in selected_services:
+        next_steps.append("Speak to a mortgage advisor to confirm your borrowing range and monthly costs.")
+    if "Conveyancing quote" in selected_services:
+        next_steps.append("Request a conveyancing quote so you can compare likely moving costs more accurately.")
+
+    if not next_steps:
+        next_steps = [
+            "Arrange a local valuation to sense-check your likely sale price.",
+            "Review your mortgage options to confirm your realistic next-step budget.",
+        ]
+
+    for step in next_steps:
+        story.append(Paragraph(f"• {step}", styles["Body"]))
+        story.append(Spacer(1, 4))
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        "If you would like help reviewing your options or taking the next step, "
+        "you can request a call and we’ll guide you through your specific situation.",
+        styles["Body"]
+    ))
+
     story.append(Spacer(1, 18))
     story.append(HRFlowable(width="100%", thickness=0.6, color=BRAND["border"]))
     story.append(Spacer(1, 6))
