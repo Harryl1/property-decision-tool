@@ -64,20 +64,20 @@ def build_styles():
         name="ReportTitle",
         parent=styles["Heading1"],
         fontName="Helvetica-Bold",
-        fontSize=22,
-        leading=26,
+        fontSize=21,
+        leading=24,
         textColor=BRAND["primary"],
-        spaceAfter=4,
+        spaceAfter=2,
     ))
 
     styles.add(ParagraphStyle(
         name="ReportSubtitle",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=10,
-        leading=14,
+        fontSize=9.5,
+        leading=13,
         textColor=BRAND["subtext"],
-        spaceAfter=8,
+        spaceAfter=0,
     ))
 
     styles.add(ParagraphStyle(
@@ -350,17 +350,22 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     # Header / branding
     # ------------------------------------------
     header_left = []
+    # ------------------------------------------
+    # Header / branding
+    # ------------------------------------------
+    header_left = []
+
     if logo_path and os.path.exists(logo_path):
         try:
             print("Trying to load logo from:", logo_path)
             img = Image(logo_path)
-            max_width = 65 * mm
+            max_width = 60 * mm
             aspect = img.imageHeight / float(img.imageWidth)
             img.drawWidth = max_width
             img.drawHeight = max_width * aspect
             img.hAlign = "LEFT"
             header_left.append(img)
-            header_left.append(Spacer(1, 4))
+            header_left.append(Spacer(1, 8))
             print("Logo loaded successfully")
         except Exception as e:
             print("Logo failed to load:", str(e))
@@ -368,23 +373,36 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
         print("Logo path missing or file does not exist:", logo_path)
 
     header_left.append(Paragraph("Your Property Report", styles["ReportTitle"]))
+    header_left.append(Spacer(1, 2))
     header_left.append(Paragraph(
         "A personalised view of your equity and next-property budget.",
         styles["ReportSubtitle"]
     ))
 
     prepared_for = (
-        f"<b>Prepared for:</b> {safe_text(report_data.get('name'))}<br/>"
-        f"<b>Email:</b> {safe_text(report_data.get('email'))}<br/>"
-        f"<b>Date:</b> {datetime.now().strftime('%d %B %Y')}"
+        f"<b>Prepared for</b><br/>"
+        f"{safe_text(report_data.get('name'))}<br/>"
+        f"{safe_text(report_data.get('email'))}<br/>"
+        f"{datetime.now().strftime('%d %B %Y')}"
     )
 
+    header_right = Table(
+        [[Paragraph(prepared_for, styles["Body"])]],
+        colWidths=[content_width * 0.32]
+    )
+    header_right.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), BRAND["card_bg"]),
+        ("BOX", (0, 0), (-1, -1), 0.8, BRAND["border"]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+
     header_table = Table(
-        [[
-            header_left,
-            Paragraph(prepared_for, styles["Body"])
-        ]],
-        colWidths=[content_width * 0.62, content_width * 0.38]
+        [[header_left, header_right]],
+        colWidths=[content_width * 0.66, content_width * 0.34]
     )
     header_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -393,9 +411,9 @@ def generate_pdf_report(report_data, filepath, logo_path=None):
     ]))
 
     story.append(header_table)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.6, color=BRAND["border"]))
-    story.append(Spacer(1, 14))
+    story.append(Spacer(1, 16))
 
     # ------------------------------------------
     # Summary panel
